@@ -3,9 +3,13 @@ import { CONFIG, mulberry32, vnoise3 } from './config.js';
 
 // ─── Medium ────────────────────────────────────────────────────────────────
 export class Medium {
+  constructor() {
+    this.scaleMul = 1;
+    this.warpMul = 1;
+  }
   sample(x, y, z) {
-    const s = CONFIG.medium.scale;
-    const w = CONFIG.medium.warp;
+    const s = CONFIG.medium.scale * this.scaleMul;
+    const w = CONFIG.medium.warp * this.warpMul;
     const wx = (vnoise3(x * s * 2, y * s * 2, z * s * 2, 1) - 0.5) * w * 2;
     const wy = (vnoise3(x * s * 2, y * s * 2, z * s * 2, 2) - 0.5) * w * 2;
     const wz = (vnoise3(x * s * 2, y * s * 2, z * s * 2, 3) - 0.5) * w * 2;
@@ -78,6 +82,20 @@ export class Palette {
     this.refresh();
   }
   update(dt) { this.t += dt; this.refresh(); }
+  reseed(seed) {
+    const rng = mulberry32(seed);
+    const baseHue = rng() * 360;
+    const n = CONFIG.palette.size;
+    this.baseHSL = [];
+    for (let i = 0; i < n; i++) {
+      const h = ((baseHue + (i * 360) / n + rng() * 24) % 360) / 360;
+      const s = 0.45 + rng() * 0.4;
+      const l = 0.32 + rng() * 0.42;
+      this.baseHSL.push({ h, s, l });
+    }
+    this.t = 0;
+    this.refresh();
+  }
   refresh() {
     const shift = this.t * CONFIG.palette.cycleSpeed;
     for (let i = 0; i < this.baseHSL.length; i++) {
@@ -365,5 +383,48 @@ export class DetritusField {
       }
     }
     return gained;
+  }
+}
+
+// ─── PortalField ───────────────────────────────────────────────────────────
+export class PortalField {
+  constructor(scene, palette) {
+    this.scene = scene;
+    this.portals = [];
+    this.geo = new THREE.TorusGeometry(1.4, 0.18, 10, 32);
+  }
+  spawn(pos, palette) {
+    const color = palette.colors[Math.floor(Math.random() * palette.colors.length)].clone().multiplyScalar(1.6);
+    const mat = new THREE.MeshBasicMaterial({ color });
+    const mesh = new THREE.Mesh(this.geo, mat);
+    mesh.position.copy(pos);
+    mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+    this.scene.add(mesh);
+    this.portals.push({ mesh, phase: Math.random() * 100, baseColor: color.clone() });
+  }
+  update(dt, t, playerPos) {
+    for (const p of this.portals) {
+      p.phase += dt;
+      const d = p.mesh.position.distanceTo(playerPos);
+      const near = Math.max(0, 1 - d / CONFIG.portals.glowRadius);
+      const glow = 0.8 + 0.4 * Math.sin(p.phase * 2 + t) + near * 1.4;
+      p.mesh.scale.setScalar(1 + near * 0.6);
+      p.mesh.material.color.copy(p.baseColor).multiplyScalar(glow);
+      p.mesh.rotation.z += dt * 0.6;
+      p.mesh.rotation.x += dt * 0.3;
+    }
+  }
+  tryEnter(pos) {
+    for (const p of this.portals) {
+      if (p.mesh.position.distanceTo(pos) < CONFIG.portals.triggerRadius) return p;
+    }
+    return null;
+  }
+  clear() {
+    for (const p of this.portals) {
+      this.scene.remove(p.mesh);
+      p.mesh.material.dispose();
+    }
+    this.portals.length = 0;
   }
 }

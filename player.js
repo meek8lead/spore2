@@ -78,6 +78,11 @@ export class Player {
     });
     this.mesh = new THREE.Mesh(geo, this.material);
     scene.add(this.mesh);
+
+    this.scene = scene;
+    this.paletteArray = paletteArray;
+    this.children = [];
+    this.childGeo = new THREE.IcosahedronGeometry(0.35, 1);
   }
 
   get stage() {
@@ -118,6 +123,71 @@ export class Player {
     this.fade = 1;
   }
 
+  spawnChild() {
+    if (this.children.length >= CONFIG.colonyChild.maxChildren) return null;
+    const domIdx = this.behavior.dominantIndex();
+    const pc = this.paletteArray[domIdx % this.paletteArray.length];
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pc.x, pc.y, pc.z) });
+    const mesh = new THREE.Mesh(this.childGeo, mat);
+    mesh.position.copy(this.position);
+    mesh.scale.setScalar(0.7);
+    this.scene.add(mesh);
+    const child = { mesh, cooldown: 0 };
+    this.children.push(child);
+    return child;
+  }
+  eatChild(child) {
+    const i = this.children.indexOf(child);
+    if (i < 0) return 0;
+    this.children.splice(i, 1);
+    this.scene.remove(child.mesh);
+    child.mesh.material.dispose();
+    this.ecoLevel = Math.max(0, this.ecoLevel - CONFIG.colonyChild.eatEcoLoss);
+    return CONFIG.colonyChild.eatEnergy;
+  }
+  tryEatChildren(pos, range) {
+    let total = 0;
+    for (let i = this.children.length - 1; i >= 0; i--) {
+      if (this.children[i].mesh.position.distanceTo(pos) < range) total += this.eatChild(this.children[i]);
+    }
+    return total;
+  }
+  updateChildren(dt) {
+    const cc = CONFIG.colonyChild;
+    const n = this.children.length;
+    if (n === 0) return;
+    const stage = this.stage;
+    const velDir = this.velocity.lengthSq() > 0.01
+      ? this.velocity.clone().normalize()
+      : new THREE.Vector3(0, 0, -1);
+    const perp = new THREE.Vector3(-velDir.z, 0, velDir.x).normalize();
+    for (let i = 0; i < n; i++) {
+      const c = this.children[i];
+      c.cooldown = Math.max(0, c.cooldown - dt);
+      let target, scale;
+      if (stage === 'multicellular') {
+        const back = -(i + 1) * cc.multicellularSpacing;
+        const lateral = (i % 2 === 0 ? 1 : -1) * 0.12;
+        target = this.position.clone().addScaledVector(velDir, back).addScaledVector(perp, lateral);
+        const baseSc = cc.multicellularScale[i] || 0.6;
+        let sizeMult = 1;
+        if (i === 0 && this.behavior.predation > 0.3) sizeMult = 1.4;
+        if (i === n - 1 && this.behavior.motility > 0.3) sizeMult = 1.3;
+        scale = baseSc * 0.75 * Math.sqrt(this.mass) * sizeMult;
+      } else {
+        const a = (i / Math.max(1, n)) * Math.PI * 2 + this.time * 0.8;
+        target = this.position.clone().add(new THREE.Vector3(
+          Math.cos(a) * cc.orbitRadius, Math.sin(a * 0.7) * 0.4, Math.sin(a) * cc.orbitRadius,
+        ));
+        scale = 0.7;
+      }
+      c.mesh.position.lerp(target, 1 - Math.exp(-cc.driftLerp * dt));
+      c.mesh.scale.setScalar(scale);
+      c.mesh.rotation.x += dt * 1.2;
+      c.mesh.rotation.y += dt * 1.6;
+    }
+  }
+
   update(dt, input, medium) {
     this.time += dt;
     const sample = medium.sample(this.position.x, this.position.y, this.position.z);
@@ -133,6 +203,7 @@ export class Player {
     if (this.dead) {
       this.material.uniforms.uTime.value = this.time;
       this.material.uniforms.uHurt.value = 0;
+      this.updateChildren(dt);
       return { sample, moving: false };
     }
 
@@ -165,6 +236,7 @@ export class Player {
       this.mitosisCount++;
       this.mitosisFlash = 1;
       this.mitosisCooldown = CONFIG.player.mitosisCooldown;
+      if (this.stage !== 'cell') this.spawnChild();
     }
 
     this.mesh.scale.setScalar(Math.sqrt(this.mass));
@@ -186,6 +258,7 @@ export class Player {
     this.material.uniforms.uTime.value = this.time;
     this.material.uniforms.uEnergy.value = energyRatio;
 
+    this.updateChildren(dt);
     return { sample, moving };
   }
 

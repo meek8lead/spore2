@@ -13,7 +13,10 @@
       white-space: pre; pointer-events: none;
       text-shadow: 0 0 4px rgba(120,255,120,0.7);
       mix-blend-mode: screen;
+      transition: opacity 0.3s;
     }
+    #debug.hidden { opacity: 0; }
+    #debug.hidden * { display: none; }
     #hint {
       position: fixed; bottom: 8px; left: 8px; z-index: 10;
       color: #b8ffb8; font: 11px ui-monospace, monospace;
@@ -30,7 +33,7 @@
 </head>
 <body>
   <div id="debug"></div>
-  <div id="hint">WASD/стрелки — плыви · ЛКМ — укус · Space — рывок · подплыви и жди — симбиоз</div>
+  <div id="hint">WASD/стрелки — плыви · ЛКМ — укус · удерживай ЛКМ без цели — съесть колонию · Space — рывок · жди у крупного — симбиоз · кольцо вдали — переход</div>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

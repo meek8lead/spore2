@@ -40,6 +40,35 @@ export const CONFIG = {
     symbiosisRange: 2.5, symbiosisBreakRange: 4.0,
     symbiosisDuration: 3.0, symbiosisEnergyPerSec: 6, symbiosisPulseRate: 0.4,
   },
+  colonyChild: {
+    maxChildren: 5, orbitRadius: 1.4, driftLerp: 3.0,
+    eatRange: 1.8, eatEnergy: 25, eatEcoLoss: 0.04,
+    attackRange: 4, attackCooldown: 4.0, attackEcoGain: 0.01,
+    multicellularSpacing: 0.85, multicellularScale: [1.1, 0.95, 0.85, 0.75, 0.65],
+  },
+  symbiontDefense: { range: 10, cooldown: 2.5 },
+  portals: {
+    spawnDistanceMin: 35, spawnDistanceMax: 55,
+    triggerRadius: 2.2, glowRadius: 12,
+    cooldown: 3.0,
+  },
+  remix: {
+    fadeDuration: 0.7,
+    presets: [
+      { name: 'BASE',  mediumScale: 1.0, mediumWarp: 1.0, paletteSeed: 42,   food: 48, largeChance: 0.4 },
+      { name: 'DENSE', mediumScale: 1.6, mediumWarp: 1.4, paletteSeed: 1337, food: 30, largeChance: 0.6 },
+      { name: 'VOID',  mediumScale: 0.6, mediumWarp: 0.4, paletteSeed: 7777, food: 18, largeChance: 0.2 },
+      { name: 'BLOOM', mediumScale: 0.9, mediumWarp: 2.2, paletteSeed: 2024, food: 60, largeChance: 0.3 },
+    ],
+  },
+  audio: {
+    enabled: true,
+    masterGain: 0.22,
+    ambientBaseFreq: 55,
+  },
+  ui: {
+    hintTimeout: 15,
+  },
 };
 
 export function mulberry32(seed) {
