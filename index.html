@@ -3,12 +3,75 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ПУСТОТА</title>
+  <title>ПУСТОТА · OBSERVATION TAPE 03</title>
   <style>
     html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
     canvas { display: block; }
+
+    /* ── VHS educational overlay ── */
+    #vhs {
+      position: fixed; inset: 0; z-index: 8; pointer-events: none;
+      font-family: ui-monospace, "Courier New", monospace;
+      color: rgba(255, 255, 255, 0.88);
+      text-shadow:
+        1px 1px 0 rgba(0, 0, 0, 0.85),
+        -1px -1px 0 rgba(255, 255, 255, 0.25),
+        0 0 6px rgba(180, 255, 180, 0.25);
+      letter-spacing: 1.6px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    #vhs .vhs-corner { position: absolute; line-height: 1.45; }
+    #vhs .vhs-top-left  { top: 16px; left: 22px; }
+    #vhs .vhs-top-right { top: 16px; right: 22px; text-align: right; }
+    #vhs .vhs-bottom-left  { bottom: 18px; left: 22px; }
+    #vhs .vhs-bottom-right { bottom: 18px; right: 22px; text-align: right; }
+
+    #vhs .vhs-rec {
+      display: inline-flex; align-items: center; gap: 7px;
+      color: #ff4444;
+      text-shadow: 0 0 8px rgba(255, 60, 60, 0.7);
+      letter-spacing: 2px;
+    }
+    #vhs .vhs-rec-dot {
+      display: inline-block; width: 9px; height: 9px;
+      background: #ff2222; border-radius: 50%;
+      box-shadow: 0 0 8px #ff2222;
+      animation: vhs-blink 1.15s steps(2) infinite;
+    }
+    @keyframes vhs-blink { 50% { opacity: 0.15; } }
+
+    #vhs .vhs-dim { opacity: 0.55; font-size: 11px; letter-spacing: 2px; }
+
+    #vhs .vhs-caption {
+      position: absolute;
+      bottom: 62px; left: 50%; transform: translateX(-50%);
+      padding: 5px 18px;
+      background: rgba(0, 0, 0, 0.5);
+      border-left: 3px solid rgba(255, 255, 255, 0.55);
+      border-right: 3px solid rgba(255, 255, 255, 0.55);
+      font-size: 12px; letter-spacing: 2.5px;
+      opacity: 0; transition: opacity 0.35s;
+      max-width: 78%; text-align: center; white-space: nowrap;
+      text-transform: uppercase;
+    }
+    #vhs .vhs-caption.show { opacity: 1; }
+    #vhs .vhs-caption.chapter { font-size: 14px; letter-spacing: 3px; padding: 8px 24px; }
+
+    /* тонкие сканлайны поверх HTML-оверлея (в дополнение к шейдеру) */
+    #vhs::before {
+      content: ''; position: absolute; inset: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent 0, transparent 3px,
+        rgba(0, 0, 0, 0.04) 3px, rgba(0, 0, 0, 0.04) 4px
+      );
+      pointer-events: none;
+      mix-blend-mode: multiply;
+    }
+
+    /* ── Game HUD (toggle 0) ── */
     #debug {
-      position: fixed; top: 8px; left: 8px; z-index: 10;
+      position: fixed; top: 8px; left: 8px; z-index: 20;
       color: #b8ffb8; font: 11px/1.4 ui-monospace, monospace;
       white-space: pre; pointer-events: none;
       text-shadow: 0 0 4px rgba(120,255,120,0.7);
@@ -17,11 +80,45 @@
     }
     #debug.hidden { opacity: 0; }
     #debug.hidden * { display: none; }
+
     #hint {
-      position: fixed; bottom: 8px; left: 8px; z-index: 10;
+      position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%);
+      z-index: 20;
       color: #b8ffb8; font: 11px ui-monospace, monospace;
-      opacity: 0.5; pointer-events: none;
+      opacity: 0.5; pointer-events: none; text-align: center;
     }
+
+    #hud {
+      position: fixed; inset: 0; pointer-events: none; z-index: 18;
+      font: 12px ui-monospace, monospace; color: #a8e8a8;
+      text-shadow: 0 0 3px rgba(120,255,120,0.4);
+      display: none;
+    }
+    #hud.active { display: block; }
+    .hud-panel {
+      position: absolute; padding: 8px 12px;
+      background: rgba(0, 18, 0, 0.32);
+      border: 1px solid rgba(120, 220, 120, 0.35);
+      box-shadow: inset 0 0 12px rgba(60, 180, 60, 0.1);
+    }
+    .hud-panel::before {
+      content: ''; position: absolute; inset: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent 0, transparent 2px,
+        rgba(0, 0, 0, 0.15) 2px, rgba(0, 0, 0, 0.15) 3px
+      );
+      pointer-events: none;
+    }
+    .hud-left  { bottom: 12px; left: 12px; min-width: 220px; }
+    .hud-right { bottom: 12px; right: 12px; min-width: 160px; text-align: right; }
+    .hud-top   { top: 12px; left: 50%; transform: translateX(-50%); }
+    .hud-row { display: flex; align-items: center; gap: 8px; line-height: 1.7; position: relative; z-index: 1; }
+    .hud-right .hud-row { justify-content: flex-end; }
+    .hud-label { opacity: 0.55; font-size: 10px; letter-spacing: 1px; }
+    .hud-val { color: #d0ffd0; min-width: 32px; }
+    .hud-bar { width: 110px; height: 6px; background: rgba(120,220,120,0.12); position: relative; }
+    .hud-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #6ecf6e; transition: width 0.08s linear; }
+    .hud-fill-hp { background: #a0efb0; }
   </style>
   <script type="importmap">
   {
@@ -32,8 +129,43 @@
   </script>
 </head>
 <body>
+  <!-- VHS educational overlay -->
+  <div id="vhs">
+    <div class="vhs-corner vhs-top-left">
+      <div class="vhs-rec"><span class="vhs-rec-dot"></span>REC</div>
+      <div class="vhs-dim">CH 03 · SP</div>
+    </div>
+    <div class="vhs-corner vhs-top-right">
+      <div id="vhs-date">15 MAR 1994</div>
+      <div class="vhs-dim" id="vhs-time">03:15:22</div>
+    </div>
+    <div class="vhs-corner vhs-bottom-left">
+      <div>▶ PLAY</div>
+      <div class="vhs-dim">STEREO · HI-FI</div>
+    </div>
+    <div class="vhs-corner vhs-bottom-right">
+      <div class="vhs-dim" id="vhs-world">WORLD: BASE</div>
+      <div class="vhs-dim" id="vhs-eco">ECO 0.000</div>
+    </div>
+    <div class="vhs-caption" id="vhs-caption"></div>
+  </div>
+
   <div id="debug"></div>
-  <div id="hint">WASD/стрелки — плыви · ЛКМ — укус · удерживай ЛКМ без цели — съесть колонию · Space — рывок · жди у крупного — симбиоз · кольцо вдали — переход</div>
+  <div id="hud">
+    <div class="hud-panel hud-top">
+      <div class="hud-row"><span class="hud-label">DOMINANT</span><span class="hud-val" id="hud-dominant">—</span></div>
+    </div>
+    <div class="hud-panel hud-left">
+      <div class="hud-row"><span class="hud-label">ENERGY</span><div class="hud-bar"><div class="hud-fill" id="hud-energy"></div></div><span class="hud-val" id="hud-energy-val">100</span></div>
+      <div class="hud-row"><span class="hud-label">HP</span><div class="hud-bar"><div class="hud-fill hud-fill-hp" id="hud-hp"></div></div><span class="hud-val" id="hud-hp-val">100</span></div>
+    </div>
+    <div class="hud-panel hud-right">
+      <div class="hud-row"><span class="hud-label">STAGE</span><span class="hud-val" id="hud-stage">cell</span></div>
+      <div class="hud-row"><span class="hud-label">ECO</span><span class="hud-val" id="hud-eco">0.000</span></div>
+      <div class="hud-row"><span class="hud-label">COLONY</span><span class="hud-val" id="hud-children">0/5</span></div>
+    </div>
+  </div>
+  <div id="hint">WASD/стрелки — плыви · ЛКМ — укус · Space — рывок · кольца вдали — выбор мира · 0 — HUD · ` — debug</div>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

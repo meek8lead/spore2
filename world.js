@@ -31,7 +31,7 @@ export class Medium {
   }
 }
 
-// ─── Ecosystem ─────────────────────────────────────────────────────────────
+// ─── Ecosystem helpers ─────────────────────────────────────────────────────
 export function ecoLevelAt(pos, playerPos, playerEco, medium, rubberOffset = 0) {
   const trueLvl = medium.ecoLevel(pos.x, pos.y, pos.z);
   const d = pos.distanceTo(playerPos);
@@ -68,47 +68,42 @@ export class Palette {
     this.uniformArray = [];
     this.baseHSL = [];
     this.t = 0;
-    const rng = mulberry32(seed);
-    const baseHue = rng() * 360;
-    const n = CONFIG.palette.size;
-    for (let i = 0; i < n; i++) {
-      const h = ((baseHue + (i * 360) / n + rng() * 24) % 360) / 360;
-      const s = 0.45 + rng() * 0.4;
-      const l = 0.32 + rng() * 0.42;
-      this.baseHSL.push({ h, s, l });
-      this.colors.push(new THREE.Color().setHSL(h, s, l));
-      this.uniformArray.push(new THREE.Vector3());
-    }
+    this._build(seed);
     this.refresh();
   }
-  update(dt) { this.t += dt; this.refresh(); }
-  reseed(seed) {
+  _build(seed) {
     const rng = mulberry32(seed);
     const baseHue = rng() * 360;
     const n = CONFIG.palette.size;
     this.baseHSL = [];
     for (let i = 0; i < n; i++) {
-      const h = ((baseHue + (i * 360) / n + rng() * 24) % 360) / 360;
-      const s = 0.45 + rng() * 0.4;
-      const l = 0.32 + rng() * 0.42;
+      const h = ((baseHue + (i * 360) / n + rng() * 20) % 360) / 360;
+      const s = 0.22 + rng() * 0.32;
+      const l = 0.34 + rng() * 0.28;
       this.baseHSL.push({ h, s, l });
+      if (!this.colors[i]) {
+        this.colors[i] = new THREE.Color();
+        this.uniformArray[i] = new THREE.Vector3();
+      }
     }
-    this.t = 0;
-    this.refresh();
   }
+  update(dt) { this.t += dt; this.refresh(); }
+  reseed(seed) { this._build(seed); this.t = 0; this.refresh(); }
   refresh() {
     const shift = this.t * CONFIG.palette.cycleSpeed;
+    const satMul = CONFIG.palette.saturationMul;
     for (let i = 0; i < this.baseHSL.length; i++) {
       const b = this.baseHSL[i];
       const h = (b.h + shift * 0.03 + 1) % 1;
-      const l = Math.max(0.08, Math.min(0.92, b.l + Math.sin(this.t * 0.3 + i * 0.7) * 0.05));
-      const c = this.colors[i].setHSL(h, b.s, l);
+      const l = Math.max(0.15, Math.min(0.82, b.l + Math.sin(this.t * 0.15 + i * 0.7) * 0.03));
+      const s = b.s * satMul;
+      const c = this.colors[i].setHSL(h, s, l);
       this.uniformArray[i].set(c.r, c.g, c.b);
     }
   }
 }
 
-// ─── Background (skybox shader) ────────────────────────────────────────────
+// ─── Background ────────────────────────────────────────────────────────────
 export function createBackground(palette) {
   const geo = new THREE.SphereGeometry(200, 32, 16);
   const mat = new THREE.ShaderMaterial({
@@ -152,15 +147,15 @@ export function createBackground(palette) {
 
       void main(){
         vec3 d=normalize(vDir);
-        float t=uTime*0.04;
-        vec3 w=vec3(snoise(d*2.0+t),snoise(d*2.0+t+10.0),snoise(d*2.0+t+20.0))*0.7;
-        float a=snoise(d*3.0+w+t*0.3)*0.5+0.5;
-        float b=snoise(d*7.0+w*2.0-t*0.2)*0.5+0.5;
-        float v=mix(a,b,0.45);
+        float t=uTime*0.02;
+        vec3 w=vec3(snoise(d*1.5+t),snoise(d*1.5+t+10.0),snoise(d*1.5+t+20.0))*0.45;
+        float a=snoise(d*2.5+w+t*0.15)*0.5+0.5;
+        float b=snoise(d*5.0+w*1.4-t*0.1)*0.5+0.5;
+        float v=mix(a,b,0.35);
         vec3 col=paletteLookup(v);
-        col*=mix(0.35,1.0,d.y*0.5+0.5);
-        float band=sin(d.y*9.0+uTime*0.2)*0.5+0.5;
-        col=mix(col,paletteLookup(band*0.9),0.18);
+        col*=mix(0.45,1.0,d.y*0.5+0.5);
+        float horizon=smoothstep(0.03,0.0,abs(d.y-0.02));
+        col=mix(col,col*1.15,horizon*0.3);
         gl_FragColor=vec4(col,1.0);
       }
     `,
@@ -172,15 +167,27 @@ export function createBackground(palette) {
   return mesh;
 }
 
-// ─── FoodField ─────────────────────────────────────────────────────────────
+// ─── FoodField (3 типа: organic / mineral / toxic) ────────────────────────
 export class FoodField {
   constructor(scene, palette, seed = 99) {
     this.rng = mulberry32(seed);
     this.foods = [];
     this.group = new THREE.Group();
     this.geo = new THREE.IcosahedronGeometry(0.28, 0);
+    this.geoMineral = new THREE.OctahedronGeometry(0.22, 0);
     scene.add(this.group);
     for (let i = 0; i < CONFIG.world.foodCount; i++) this.spawnAround(new THREE.Vector3(), palette);
+  }
+  _rollType() {
+    const roll = Math.random();
+    if (roll < CONFIG.food.toxicChance) return 'toxic';
+    if (roll < CONFIG.food.toxicChance + CONFIG.food.mineralChance) return 'mineral';
+    return 'organic';
+  }
+  _colorFor(type, palette) {
+    if (type === 'toxic') return palette.colors[3].clone().multiplyScalar(0.3);
+    if (type === 'mineral') return new THREE.Color(0.92, 0.88, 0.35);
+    return palette.colors[Math.floor(this.rng() * palette.colors.length)].clone();
   }
   spawnAround(center, palette) {
     const angle = this.rng() * Math.PI * 2;
@@ -193,13 +200,13 @@ export class FoodField {
     this._createFood(pos, palette);
   }
   _createFood(pos, palette, ecoLevel = 0.5) {
-    const toxic = Math.random() < CONFIG.food.toxicChance;
-    const colorIdx = toxic ? 3 : Math.floor(this.rng() * palette.colors.length);
-    const mat = new THREE.MeshBasicMaterial({ color: palette.colors[colorIdx].clone() });
-    const mesh = new THREE.Mesh(this.geo, mat);
+    const type = this._rollType();
+    const mat = new THREE.MeshBasicMaterial({ color: this._colorFor(type, palette) });
+    const geo = type === 'mineral' ? this.geoMineral : this.geo;
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(pos);
     this.group.add(mesh);
-    this.foods.push({ mesh, energy: 8 + ecoLevel * 30, alive: true, toxic });
+    this.foods.push({ mesh, energy: 8 + ecoLevel * 30, alive: true, type });
   }
   seedAround(center, count, radius) {
     for (let i = 0; i < count; i++) {
@@ -224,19 +231,33 @@ export class FoodField {
       f.mesh.position.y += Math.sin(t * 1.7 + f.mesh.position.x * 0.8) * 0.002;
     }
   }
-  tryEat(pos, range) {
+  tryEat(pos, range, includeMineral = false) {
     let energy = 0;
     let toxicCount = 0;
+    let mineralCount = 0;
     for (const f of this.foods) {
       if (!f.alive) continue;
-      if (f.mesh.position.distanceTo(pos) < range) {
-        f.alive = false;
-        f.mesh.visible = false;
-        energy += f.toxic ? f.energy * CONFIG.food.toxicEnergyMult : f.energy;
-        if (f.toxic) toxicCount++;
-      }
+      if (f.mesh.position.distanceTo(pos) >= range) continue;
+      if (f.type === 'mineral' && !includeMineral) continue;
+      f.alive = false;
+      f.mesh.visible = false;
+      if (f.type === 'toxic') { energy += f.energy * CONFIG.food.toxicEnergyMult; toxicCount++; }
+      else if (f.type === 'mineral') { mineralCount++; }
+      else energy += f.energy;
     }
-    return { energy, toxicCount };
+    return { energy, toxicCount, mineralCount };
+  }
+  // Для экосистемы NPC: small едят органику
+  tryEatForNpc(pos, range) {
+    for (const f of this.foods) {
+      if (!f.alive) continue;
+      if (f.type !== 'organic') continue;
+      if (f.mesh.position.distanceTo(pos) >= range) continue;
+      f.alive = false;
+      f.mesh.visible = false;
+      return f.energy;
+    }
+    return 0;
   }
   respawnDead(playerPos, palette, playerEcoLevel, medium, rubberOffset) {
     for (const f of this.foods) {
@@ -254,14 +275,13 @@ export class FoodField {
       f.alive = true;
       f.mesh.visible = true;
       f.energy = 8 + lvl * 30;
-      f.toxic = Math.random() < CONFIG.food.toxicChance;
-      const idx = f.toxic ? 3 : Math.floor(this.rng() * palette.colors.length);
-      f.mesh.material.color.copy(palette.colors[idx]);
+      f.type = this._rollType();
+      f.mesh.material.color.copy(this._colorFor(f.type, palette));
     }
   }
 }
 
-// ─── Npc ───────────────────────────────────────────────────────────────────
+// ─── Npc with ecosystem (C) ───────────────────────────────────────────────
 export class Npc {
   constructor(scene, palette, spawnPos, type) {
     this.type = type;
@@ -272,6 +292,13 @@ export class Npc {
     this.attached = false;
     this.symbiosisTime = 0;
     this.phase = Math.random() * 100;
+    this.hunger = Math.random() * 0.3;
+    this.hp = 100;
+    this.eatCooldown = 0;
+    this.eatenCount = 0;
+    this.reproCooldown = 0;
+    this.reproReady = false;
+    this.deadTimer = 0;
 
     const geo = new THREE.IcosahedronGeometry(type.size, 1);
     const colorIdx = type.damage > 0 ? 5 : Math.floor(Math.random() * palette.colors.length);
@@ -280,12 +307,93 @@ export class Npc {
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.position.copy(this.position);
     scene.add(this.mesh);
+    this.scene = scene;
   }
-  update(dt, playerPos) {
-    if (!this.alive) return;
-    this.phase += dt;
-    const t = this.type;
 
+  _rescale(size) {
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = new THREE.IcosahedronGeometry(size, 1);
+  }
+
+  respawn(pos, type) {
+    this.type = type;
+    this._rescale(type.size);
+    this.position.copy(pos);
+    this.home.copy(pos);
+    this.mesh.position.copy(pos);
+    this.alive = true;
+    this.mesh.visible = true;
+    this.hunger = 0.3;
+    this.eatCooldown = 0;
+    this.eatenCount = 0;
+    this.hp = 100;
+    this.reproCooldown = 0;
+    this.reproReady = false;
+    this.attached = false;
+    this.symbiosisTime = 0;
+    this.velocity.set(0, 0, 0);
+    const colorIdx = type.damage > 0 ? 5 : Math.floor(Math.random() * 16);
+    // re-color (approximate; palette will override anyway)
+    this.material.color.copy(this.baseColor);
+  }
+
+  update(dt, playerPos, ctx) {
+    if (!this.alive) { this.deadTimer += dt; return; }
+    this.phase += dt;
+    this.eatCooldown = Math.max(0, this.eatCooldown - dt);
+    this.reproCooldown = Math.max(0, this.reproCooldown - dt);
+
+    // голод растёт
+    this.hunger = Math.min(1, this.hunger + CONFIG.ecosystem.npcHungerRate * dt);
+
+    // ── Питание ──
+    if (this.eatCooldown <= 0 && ctx) {
+      if (this.type.name === 'small' && ctx.food) {
+        const energy = ctx.food.tryEatForNpc(this.position, CONFIG.ecosystem.smallFoodRange);
+        if (energy > 0) {
+          this.hunger = Math.max(0, this.hunger - 0.4);
+          this.eatenCount++;
+          this.eatCooldown = CONFIG.ecosystem.npcEatCooldown;
+          if (this.eatenCount >= CONFIG.ecosystem.smallReproCount && this.reproCooldown <= 0) {
+            this.reproReady = true;
+            this.eatenCount = 0;
+            this.reproCooldown = CONFIG.ecosystem.reproCooldown;
+          }
+        }
+      }
+      if (this.type.name === 'large' && ctx.npcs) {
+        for (const other of ctx.npcs) {
+          if (other === this || !other.alive) continue;
+          if (other.type.name !== 'small') continue;
+          if (this.position.distanceTo(other.position) < CONFIG.ecosystem.largeEatRange) {
+            const info = other.kill();
+            this.hunger = Math.max(0, this.hunger - 0.6);
+            this.eatenCount++;
+            this.eatCooldown = CONFIG.ecosystem.npcEatCooldown;
+            if (ctx.onNpcKilled) ctx.onNpcKilled(other, info);
+            if (this.eatenCount >= CONFIG.ecosystem.largeReproCount && this.reproCooldown <= 0) {
+              this.reproReady = true;
+              this.eatenCount = 0;
+              this.reproCooldown = CONFIG.ecosystem.reproCooldown;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // ── Голодная смерть ──
+    if (this.hunger >= 1.0) {
+      this.hp -= CONFIG.ecosystem.npcStarveDamage * dt;
+      if (this.hp <= 0 && this.alive) {
+        const info = this.kill();
+        if (ctx && ctx.onNpcKilled) ctx.onNpcKilled(this, info);
+      }
+      return;
+    }
+
+    // ── Движение (поведение — как раньше) ──
+    const t = this.type;
     let target, speed;
     if (t.damage > 0) {
       const d = this.position.distanceTo(playerPos);
@@ -313,6 +421,18 @@ export class Npc {
       if (toPlayer.length() < t.fleeRange) {
         target = this.position.clone().add(toPlayer.normalize().multiplyScalar(3));
       }
+      // small flee hungry large
+      if (this.hunger < 0.7) {
+        for (const other of (ctx?.npcs || [])) {
+          if (other === this || !other.alive) continue;
+          if (other.type.damage > 0 && this.position.distanceTo(other.position) < 3.5) {
+            const away = this.position.clone().sub(other.position).normalize().multiplyScalar(3);
+            target = this.position.clone().add(away);
+            speed = t.fleeStrength;
+            break;
+          }
+        }
+      }
     }
 
     const desired = target.sub(this.position);
@@ -323,15 +443,19 @@ export class Npc {
     this.mesh.rotation.x += dt * 0.8;
     this.mesh.rotation.y += dt * 1.1;
 
-    if (this.attached) this.material.color.copy(this.baseColor).multiplyScalar(1.4);
-    else this.material.color.copy(this.baseColor);
+    // визуальные сигналы голода: тусклее и меньше когда голоден
+    const health = 1 - this.hunger * 0.6;
+    if (this.attached) this.material.color.copy(this.baseColor).multiplyScalar(1.4 * health);
+    else this.material.color.copy(this.baseColor).multiplyScalar(0.5 + health * 0.6);
   }
+
   tryHit() {
     if (this.attached) return false;
     if (this.type.damage <= 0) return false;
     return true;
   }
   kill() {
+    if (!this.alive) return { pos: this.position.clone(), eco: 0 };
     this.alive = false;
     this.mesh.visible = false;
     return { pos: this.position.clone(), eco: this.type.corpseEco };
@@ -386,33 +510,49 @@ export class DetritusField {
   }
 }
 
-// ─── PortalField ───────────────────────────────────────────────────────────
+// ─── PortalField with presets (D) ─────────────────────────────────────────
 export class PortalField {
   constructor(scene, palette) {
     this.scene = scene;
     this.portals = [];
-    this.geo = new THREE.TorusGeometry(1.4, 0.18, 10, 32);
   }
-  spawn(pos, palette) {
-    const color = palette.colors[Math.floor(Math.random() * palette.colors.length)].clone().multiplyScalar(1.6);
+  spawnWithPreset(pos, palette, presetName = 'BASE') {
+    const preset = CONFIG.portalPresets[presetName] || CONFIG.portalPresets.BASE;
+    const color = new THREE.Color(preset.color[0], preset.color[1], preset.color[2]);
+    const geo = new THREE.TorusGeometry(preset.radius, preset.tube, 10, 32);
     const mat = new THREE.MeshBasicMaterial({ color });
-    const mesh = new THREE.Mesh(this.geo, mat);
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(pos);
     mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
     this.scene.add(mesh);
-    this.portals.push({ mesh, phase: Math.random() * 100, baseColor: color.clone() });
+    this.portals.push({
+      mesh, geo, phase: Math.random() * 100,
+      baseColor: color.clone(), preset: presetName, presetData: preset,
+    });
   }
+  // обратная совместимость
+  spawn(pos, palette) { this.spawnWithPreset(pos, palette, 'BASE'); }
+
   update(dt, t, playerPos) {
     for (const p of this.portals) {
       p.phase += dt;
       const d = p.mesh.position.distanceTo(playerPos);
       const near = Math.max(0, 1 - d / CONFIG.portals.glowRadius);
-      const glow = 0.8 + 0.4 * Math.sin(p.phase * 2 + t) + near * 1.4;
+      const glowBase = p.presetData.glow;
+      const glow = glowBase * (0.8 + 0.4 * Math.sin(p.phase * 2 + t)) + near * 1.4;
       p.mesh.scale.setScalar(1 + near * 0.6);
       p.mesh.material.color.copy(p.baseColor).multiplyScalar(glow);
-      p.mesh.rotation.z += dt * 0.6;
-      p.mesh.rotation.x += dt * 0.3;
+      p.mesh.rotation.z += dt * p.presetData.spin;
+      p.mesh.rotation.x += dt * p.presetData.spin * 0.5;
     }
+  }
+  closestDistance(playerPos) {
+    let d = Infinity;
+    for (const p of this.portals) {
+      const dist = p.mesh.position.distanceTo(playerPos);
+      if (dist < d) d = dist;
+    }
+    return d;
   }
   tryEnter(pos) {
     for (const p of this.portals) {
@@ -424,6 +564,7 @@ export class PortalField {
     for (const p of this.portals) {
       this.scene.remove(p.mesh);
       p.mesh.material.dispose();
+      if (p.geo) p.geo.dispose();
     }
     this.portals.length = 0;
   }

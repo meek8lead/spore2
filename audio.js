@@ -8,6 +8,8 @@ export class Audio {
     this.enabled = CONFIG.audio.enabled;
     this.droneNodes = [];
     this.noiseFilter = null;
+    this.portalOsc = null;
+    this.threatOsc = null;
   }
   start() {
     if (this.started || !this.enabled) return;
@@ -27,7 +29,7 @@ export class Audio {
       osc.type = 'sine';
       osc.frequency.value = CONFIG.audio.ambientBaseFreq * (1 + i * 0.5);
       const gain = ctx.createGain();
-      gain.gain.value = 0.12;
+      gain.gain.value = 0.1;
       osc.connect(gain).connect(this.master);
       osc.start();
       this.droneNodes.push({ osc, gain });
@@ -48,18 +50,51 @@ export class Audio {
     noise.connect(filter).connect(ng).connect(this.master);
     noise.start();
     this.noiseFilter = filter;
+
+    // portal proximity tone
+    {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = 200;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      osc.connect(gain).connect(this.master);
+      osc.start();
+      this.portalOsc = { osc, gain };
+    }
+    // large-NPC threat pulse
+    {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 42;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      osc.connect(gain).connect(this.master);
+      osc.start();
+      this.threatOsc = { osc, gain };
+    }
   }
-  updateAmbient(density, toxicity) {
+  updateAmbient(density, toxicity, portalProx, largeProx, dominant) {
     if (!this.started) return;
     const now = this.ctx.currentTime;
     for (let i = 0; i < this.droneNodes.length; i++) {
       const n = this.droneNodes[i];
-      const f = CONFIG.audio.ambientBaseFreq * (1 + i * 0.5) * (0.8 + density * 0.4);
-      n.osc.frequency.setTargetAtTime(f, now, 0.2);
-      n.gain.gain.setTargetAtTime(0.08 + density * 0.08, now, 0.3);
+      let f = CONFIG.audio.ambientBaseFreq * (1 + i * 0.5) * (0.85 + density * 0.3);
+      if (dominant === 'predation') f *= 1.15;
+      if (dominant === 'symbiosis') f *= 0.92;
+      n.osc.frequency.setTargetAtTime(f, now, 0.3);
+      n.gain.gain.setTargetAtTime(0.06 + density * 0.07, now, 0.3);
     }
     if (this.noiseFilter) {
-      this.noiseFilter.frequency.setTargetAtTime(400 + density * 1200 + toxicity * 800, now, 0.3);
+      this.noiseFilter.frequency.setTargetAtTime(400 + density * 1000 + toxicity * 800, now, 0.3);
+    }
+    if (this.portalOsc) {
+      const f = 180 + portalProx * 900;
+      this.portalOsc.osc.frequency.setTargetAtTime(f, now, 0.2);
+      this.portalOsc.gain.gain.setTargetAtTime(portalProx * 0.09, now, 0.3);
+    }
+    if (this.threatOsc) {
+      this.threatOsc.gain.gain.setTargetAtTime(largeProx * 0.11, now, 0.3);
     }
   }
   _blip(freq, dur, type = 'sine', gainV = 0.3) {
@@ -96,6 +131,8 @@ export class Audio {
   bite()     { this._sweep(400, 120, 0.18, 'sawtooth', 0.18); }
   damage()   { this._sweep(180, 60, 0.35, 'square', 0.22); }
   mitosis()  { this._blip(660, 0.25); setTimeout(() => this._blip(990, 0.3), 70); }
+  metamorphosis() { this._sweep(120, 800, 1.2, 'sine', 0.25); setTimeout(() => this._blip(1200, 0.5, 'triangle', 0.2), 400); }
+  mineral()  { this._blip(1320, 0.15, 'triangle', 0.16); }
   symbiosis(){ this._blip(440, 0.4); setTimeout(() => this._blip(554, 0.4), 100); setTimeout(() => this._blip(660, 0.6), 200); }
   portal()   { this._sweep(200, 1200, 0.7, 'triangle', 0.28); }
   death()    { this._sweep(400, 40, 1.2, 'sine', 0.28); }

@@ -1,8 +1,12 @@
 export const CONFIG = {
   render: { internalHeight: 270, maxDt: 1 / 20 },
-  palette: { size: 16, cycleSpeed: 0.06 },
+  palette: { size: 16, cycleSpeed: 0.015, saturationMul: 0.72 },
   medium: { scale: 0.008, warp: 0.6 },
-  behavior: { rate: 0.15, pulseDecay: 2.5, foodPulse: 0.6, npcPulse: 0.9, scavengingPulse: 0.5 },
+  behavior: {
+    rate: 0.15, pulseDecay: 2.5, foodPulse: 0.6, npcPulse: 0.9,
+    scavengingPulse: 0.5, tradeoff: 0.35,
+    deadZoneTime: 60, deadZoneDecay: 0.01,
+  },
   player: {
     accel: 14, maxSpeed: 8, drag: 2.4, baseEnergy: 100, drainIdle: 1.2, drainMove: 3.4,
     passiveGain: 0.35, eatRange: 1.1,
@@ -12,6 +16,7 @@ export const CONFIG = {
     dashSpeed: 22, dashCost: 15, dashCooldown: 1.2,
     maxHp: 100, hpRegen: 0.8, damageFlashDecay: 3.0,
     respawnDelay: 2.0, respawnEnergyRatio: 0.5, respawnInvuln: 2.0, fadeSpeed: 1.5,
+    deathMassLoss: 0.15,
   },
   camera: { distance: 9, height: 3.5, followLerp: 0.12 },
   world: {
@@ -19,7 +24,7 @@ export const CONFIG = {
     ecoNoiseScale: 0.015, ecoRubberRadius: 22, ecoTrueBaseline: 0.3, ecoTrueAmp: 0.5,
   },
   npc: {
-    count: 3, respawnDelay: 4, contactDamageCooldown: 1.0,
+    count: 4, minCount: 2, respawnDelay: 6, contactDamageCooldown: 1.0,
     patrolRadius: 6, patrolSpeed: 1.2, patrolAggroRange: 8, patrolChaseSpeed: 2.6,
     largeSpawnEco: 0.5,
     types: [
@@ -27,28 +32,46 @@ export const CONFIG = {
       { name: 'large', size: 0.95, wanderRadius: 5, wanderSpeed: 1.0, fleeRange: 0, fleeStrength: 0, energy: 90, corpseEco: 0.18, damage: 12 },
     ],
   },
-  detritus: { lifetime: 25, energy: 12, pickupRange: 1.2, maxItems: 20 },
+  // (C) Экосистема NPC — пищевая сеть
+  ecosystem: {
+    npcHungerRate: 0.045,       // голод/сек
+    npcEatCooldown: 3.0,        // сек между приёмами пищи
+    npcStarveDamage: 1.2,       // hp/сек при голоде 1.0
+    smallReproCount: 3,         // сколько еды нужно small, чтобы размножиться
+    largeReproCount: 2,         // сколько small нужно large, чтобы размножиться
+    maxNpcs: 10,
+    smallFoodRange: 1.0,
+    largeEatRange: 2.0,
+    reproCooldown: 8.0,
+  },
+  detritus: { lifetime: 25, energy: 12, pickupRange: 1.2, maxItems: 24 },
   rubberband: {
     lowEnergyThreshold: 0.3, highEnergyThreshold: 0.9,
     lowEnergyDuration: 8, highEnergyDuration: 12,
     foodDensityBoost: 0.6, foodDensityReduce: -0.3, smoothing: 0.5,
   },
   toxicity: { threshold: 0.7, dotPerSec: 6, evasionPulse: 0.05 },
-  food: { toxicChance: 0.15, toxicEnergyMult: 0.5, toxicPulse: 0.4 },
+  food: {
+    toxicChance: 0.15, toxicEnergyMult: 0.5, toxicPulse: 0.4,
+    mineralChance: 0.08, mineralEcoGain: 0.01, mineralArmorPulse: 0.15,
+    organicInChemChance: 0.8, // шанс спавна органики в chem-зонах
+  },
   stages: { colonyThreshold: 1.0, multicellularThreshold: 2.5 },
   colony: {
     symbiosisRange: 2.5, symbiosisBreakRange: 4.0,
     symbiosisDuration: 3.0, symbiosisEnergyPerSec: 6, symbiosisPulseRate: 0.4,
   },
   colonyChild: {
-    maxChildren: 5, orbitRadius: 1.4, driftLerp: 3.0,
+    maxChildren: 5, orbitRadius: 0.55, driftLerp: 4.5,
     eatRange: 1.8, eatEnergy: 25, eatEcoLoss: 0.04,
     attackRange: 4, attackCooldown: 4.0, attackEcoGain: 0.01,
-    multicellularSpacing: 0.85, multicellularScale: [1.1, 0.95, 0.85, 0.75, 0.65],
+    multicellularSpacing: 0.8, multicellularScale: [1.15, 1.0, 0.9, 0.8, 0.7],
   },
   symbiontDefense: { range: 10, cooldown: 2.5 },
+  // (D) Портал как выбор
   portals: {
-    spawnDistanceMin: 35, spawnDistanceMax: 55,
+    count: 3,
+    spawnDistanceMin: 32, spawnDistanceMax: 52,
     triggerRadius: 2.2, glowRadius: 12,
     cooldown: 3.0,
   },
@@ -61,13 +84,31 @@ export const CONFIG = {
       { name: 'BLOOM', mediumScale: 0.9, mediumWarp: 2.2, paletteSeed: 2024, food: 60, largeChance: 0.3 },
     ],
   },
+  // Визуальные «отпечатки» пресетов портала
+  portalPresets: {
+    BASE:  { color: [0.40, 0.60, 0.40], radius: 1.4, tube: 0.18, glow: 1.0, spin: 0.6 },
+    DENSE: { color: [0.70, 0.20, 0.20], radius: 1.7, tube: 0.30, glow: 1.2, spin: 0.9 },
+    VOID:  { color: [0.30, 0.30, 0.65], radius: 1.0, tube: 0.10, glow: 0.7, spin: 0.3 },
+    BLOOM: { color: [0.78, 0.62, 0.20], radius: 1.5, tube: 0.22, glow: 1.6, spin: 1.1 },
+  },
   audio: {
     enabled: true,
     masterGain: 0.22,
     ambientBaseFreq: 55,
   },
-  ui: {
-    hintTimeout: 15,
+  ui: { hintTimeout: 15 },
+  // (H) День/ночь
+  dayNight: {
+    cycle: 240,          // 4 минуты
+    dayLumThreshold: 0.6,
+    nightLumThreshold: 0.3,
+  },
+  // VHS educational overlay
+  vhs: {
+    dateText: '15 MAR 1994',
+    clockStart: 3 * 3600 + 15 * 60 + 22,
+    captionFadeMs: 400,
+    chapterDuration: 8,
   },
 };
 

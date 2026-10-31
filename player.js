@@ -24,6 +24,17 @@ export class BehaviorProfile {
       const target = Math.min(1, (state[f] ? 1 : 0) + this.pulses[f]);
       this[f] += (target - this[f]) * k;
     }
+    // trade-offs (A): conflicting niches cancel each other out
+    const tt = CONFIG.behavior.tradeoff * dt;
+    this.predation = Math.max(0, this.predation - tt * this.symbiosis);
+    this.symbiosis = Math.max(0, this.symbiosis - tt * this.predation);
+    const motilityPressure = this.sessility + this.armor * 0.5;
+    this.motility = Math.max(0, this.motility - tt * motilityPressure);
+    this.sessility = Math.max(0, this.sessility - tt * this.motility);
+    this.armor = Math.max(0, this.armor - tt * this.motility * 0.5);
+    this.photosynthesis = Math.max(0, this.photosynthesis - tt * this.predation * 0.5);
+    this.evasion = Math.max(0, this.evasion - tt * this.armor * 0.3);
+    this.armor = Math.max(0, this.armor - tt * this.evasion * 0.3);
   }
   dominant() {
     let best = 'motility', bestV = -1;
@@ -50,6 +61,8 @@ export class Player {
     this.mitosisCount = 0;
     this.mitosisFlash = 0;
     this.mitosisCooldown = 0;
+    this.metamorphosisFlash = 0;
+    this.lastStage = 'cell';
     this.damageFlash = 0;
     this.invulnTimer = 0;
     this.lastDamageTime = -10;
@@ -96,6 +109,25 @@ export class Player {
     return Math.max(0, Math.min(1, (this.ecoLevel - t) / (m - t)));
   }
 
+  // (A) active trade-offs: dominant behavior grants passive/active multipliers
+  getEffects() {
+    const b = this.behavior;
+    return {
+      biteMult: 1 + b.predation * 1.0,
+      eatMult: 1 + b.herbivory * 0.6,
+      dashCostMult: 1 - Math.min(0.6, b.motility * 0.6),
+      dashCdMult: 1 - Math.min(0.5, b.motility * 0.5),
+      passiveMult: 1 + b.sessility * 2.0,
+      armorMult: 1 - b.armor * 0.5,
+      speedMult: 1 - b.armor * 0.25,
+      evasionAssist: b.evasion * 0.3,
+      lightMult: 1 + b.photosynthesis * 2.0,
+      darkMult: 1 - b.photosynthesis * 0.5,
+      chemHpRegen: b.chemosynthesis * 2.0,
+      symbiosisRate: 1 - b.predation * 0.6,
+    };
+  }
+
   takeDamage(amount, now) {
     if (this.invulnTimer > 0 || this.dead) return false;
     this.hp = Math.max(0, this.hp - amount);
@@ -127,7 +159,7 @@ export class Player {
     if (this.children.length >= CONFIG.colonyChild.maxChildren) return null;
     const domIdx = this.behavior.dominantIndex();
     const pc = this.paletteArray[domIdx % this.paletteArray.length];
-    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pc.x, pc.y, pc.z) });
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pc.x * 1.2, pc.y * 1.2, pc.z * 1.2) });
     const mesh = new THREE.Mesh(this.childGeo, mat);
     mesh.position.copy(this.position);
     mesh.scale.setScalar(0.7);
@@ -152,6 +184,7 @@ export class Player {
     }
     return total;
   }
+  // (E) colony = fused tight lump; multicellular = curved tapering chain
   updateChildren(dt) {
     const cc = CONFIG.colonyChild;
     const n = this.children.length;
@@ -166,38 +199,49 @@ export class Player {
       c.cooldown = Math.max(0, c.cooldown - dt);
       let target, scale;
       if (stage === 'multicellular') {
+        // tree/chain: curved spine with taper
         const back = -(i + 1) * cc.multicellularSpacing;
-        const lateral = (i % 2 === 0 ? 1 : -1) * 0.12;
-        target = this.position.clone().addScaledVector(velDir, back).addScaledVector(perp, lateral);
+        const wave = Math.sin(this.time * 2.0 + i * 0.8) * 0.22;
+        const lateral = wave + (i % 2 === 0 ? 0.1 : -0.1);
+        target = this.position.clone()
+          .addScaledVector(velDir, back)
+          .addScaledVector(perp, lateral);
         const baseSc = cc.multicellularScale[i] || 0.6;
         let sizeMult = 1;
-        if (i === 0 && this.behavior.predation > 0.3) sizeMult = 1.4;
-        if (i === n - 1 && this.behavior.motility > 0.3) sizeMult = 1.3;
-        scale = baseSc * 0.75 * Math.sqrt(this.mass) * sizeMult;
+        if (i === 0 && this.behavior.predation > 0.3) sizeMult = 1.5;
+        if (i === n - 1 && this.behavior.motility > 0.3) sizeMult = 1.4;
+        const taper = 1 - i * 0.1;
+        scale = baseSc * 0.6 * Math.sqrt(this.mass) * sizeMult * taper;
       } else {
-        const a = (i / Math.max(1, n)) * Math.PI * 2 + this.time * 0.8;
+        // colony: tight orbit — looks fused with core
+        const a = (i / Math.max(1, n)) * Math.PI * 2 + this.time * 0.5;
         target = this.position.clone().add(new THREE.Vector3(
-          Math.cos(a) * cc.orbitRadius, Math.sin(a * 0.7) * 0.4, Math.sin(a) * cc.orbitRadius,
+          Math.cos(a) * cc.orbitRadius,
+          Math.sin(a * 0.9) * 0.12,
+          Math.sin(a) * cc.orbitRadius,
         ));
-        scale = 0.7;
+        scale = 0.55 * Math.sqrt(this.mass) * (0.9 + (i % 3) * 0.08);
       }
       c.mesh.position.lerp(target, 1 - Math.exp(-cc.driftLerp * dt));
       c.mesh.scale.setScalar(scale);
-      c.mesh.rotation.x += dt * 1.2;
-      c.mesh.rotation.y += dt * 1.6;
+      c.mesh.rotation.x += dt * 1.0;
+      c.mesh.rotation.y += dt * 1.4;
     }
   }
 
   update(dt, input, medium) {
     this.time += dt;
     const sample = medium.sample(this.position.x, this.position.y, this.position.z);
+    const effects = this.getEffects();
 
     this.invulnTimer = Math.max(0, this.invulnTimer - dt);
     this.damageFlash = Math.max(0, this.damageFlash - CONFIG.player.damageFlashDecay * dt);
     this.mitosisFlash = Math.max(0, this.mitosisFlash - dt * 2.5);
+    this.metamorphosisFlash = Math.max(0, this.metamorphosisFlash - dt * 1.2);
 
     if (!this.dead && this.time - this.lastDamageTime > 3) {
-      this.hp = Math.min(CONFIG.player.maxHp, this.hp + CONFIG.player.hpRegen * dt);
+      const regen = CONFIG.player.hpRegen + effects.chemHpRegen * sample.chemEnergy;
+      this.hp = Math.min(CONFIG.player.maxHp, this.hp + regen * dt);
     }
 
     if (this.dead) {
@@ -216,7 +260,8 @@ export class Player {
     this.velocity.multiplyScalar(drag);
 
     const sp = this.velocity.length();
-    if (sp > CONFIG.player.maxSpeed) this.velocity.multiplyScalar(CONFIG.player.maxSpeed / sp);
+    const maxSp = CONFIG.player.maxSpeed * effects.speedMult;
+    if (sp > maxSp) this.velocity.multiplyScalar(maxSp / sp);
     this.position.addScaledVector(this.velocity, dt);
 
     const moving = sp > 0.15;
@@ -239,17 +284,24 @@ export class Player {
       if (this.stage !== 'cell') this.spawnChild();
     }
 
+    // stage metamorphosis event
+    const nowStage = this.stage;
+    if (nowStage !== this.lastStage) {
+      this.metamorphosisFlash = 1;
+      this.lastStage = nowStage;
+    }
+
     this.mesh.scale.setScalar(Math.sqrt(this.mass));
     this.mesh.position.copy(this.position);
 
     this.material.uniforms.uSpikes.value = this.behavior.predation * 0.7 + this.behavior.armor * 0.4;
     this.material.uniforms.uFuzz.value = this.behavior.chemosynthesis * 1.0 + this.behavior.symbiosis * 0.6;
     this.material.uniforms.uTint.value = this.behavior.dominantIndex() / 11;
-    this.material.uniforms.uFlash.value = this.mitosisFlash;
+    this.material.uniforms.uFlash.value = Math.max(this.mitosisFlash, this.metamorphosisFlash * 0.85);
     this.material.uniforms.uHurt.value = this.damageFlash;
     this.material.uniforms.uColony.value = this.colonyFactor;
 
-    const speedRatio = Math.min(1, this.velocity.length() / CONFIG.player.maxSpeed);
+    const speedRatio = Math.min(1, this.velocity.length() / maxSp);
     this.material.uniforms.uStretch.value = this.behavior.motility * 0.35 * speedRatio;
     if (this.velocity.lengthSq() > 0.001) {
       this.material.uniforms.uStretchDir.value.copy(this.velocity).normalize();
@@ -259,7 +311,7 @@ export class Player {
     this.material.uniforms.uEnergy.value = energyRatio;
 
     this.updateChildren(dt);
-    return { sample, moving };
+    return { sample, moving, effects };
   }
 
   feed(amount) {
@@ -344,12 +396,12 @@ const FRAG = /* glsl */ `
     float tintIdx = clamp(fract(uTint + vDisp * 0.5) * 16.0, 0.0, 15.0);
     base = mix(base, uPalette[int(tintIdx)], 0.35);
     base = mix(base, base * (0.5 + 0.5 * vColony), uColony * 0.6);
-    base += vec3(vSpike * 1.5);
-    base *= mix(0.35, 1.1, uEnergy);
-    base = mix(base * 0.4, base, 1.0 - rim);
-    base += vec3(0.25) * rim * (0.6 + 0.4 * sin(uTime * 4.0));
-    base += vec3(1.0, 0.9, 0.6) * uFlash * 0.8;
-    base = mix(base, vec3(0.6, 0.05, 0.05), uHurt * 0.7);
+    base += vec3(vSpike * 1.3);
+    base *= mix(0.4, 1.05, uEnergy);
+    base = mix(base * 0.5, base, 1.0 - rim);
+    base += vec3(0.18) * rim * (0.6 + 0.4 * sin(uTime * 1.5));
+    base += vec3(1.0, 0.95, 0.7) * uFlash * 0.75;
+    base = mix(base, vec3(0.55, 0.06, 0.06), uHurt * 0.7);
     gl_FragColor = vec4(base, 1.0);
   }
 `;
